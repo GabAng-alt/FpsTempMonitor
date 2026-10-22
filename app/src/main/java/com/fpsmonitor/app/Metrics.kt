@@ -78,7 +78,22 @@ class FpsProbe(private val ctx: Context) {
 
     private class Lat(val fps: Int, val lastTs: Long)
 
+    /**
+     * `--list` imprime nombres con sufijo "#id", pero `--latency` compara contra el nombre sin él.
+     * Se prueba primero sin sufijo y, si no hay datos, con el nombre tal cual.
+     */
     private fun latency(layerName: String): Lat? {
+        val stripped = layerName.replace(Regex("#\\d+$"), "")
+        val a = latencyRaw(stripped)
+        if (a != null && a.lastTs > 0L) return a
+        if (stripped != layerName) {
+            val b = latencyRaw(layerName)
+            if (b != null && b.lastTs > 0L) return b
+        }
+        return a
+    }
+
+    private fun latencyRaw(layerName: String): Lat? {
         val out = Shell.run("dumpsys", "SurfaceFlinger", "--latency", layerName) ?: return null
         val lines = out.lines()
         if (lines.size < 2) return null
@@ -118,7 +133,7 @@ class FpsProbe(private val ctx: Context) {
             .filter { !it.contains(ctx.packageName) }
             .distinct()
             .sortedByDescending { it.startsWith("SurfaceView") }
-            .take(8)
+            .take(10)
         if (candidates.isEmpty()) {
             note = "sin capas: abre otra app (capas=${list.lines().size})"
             return null
@@ -132,7 +147,7 @@ class FpsProbe(private val ctx: Context) {
                 best = c
             }
         }
-        note = if (best == null) "sin frames en ${candidates.size} capas" else null
+        note = if (best == null) "sin frames: ${candidates.first().takeLast(24)}" else null
         return best
     }
 
