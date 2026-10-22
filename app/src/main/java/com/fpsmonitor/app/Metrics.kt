@@ -22,6 +22,7 @@ data class Snapshot(
     val app: String?,
     val temps: Temps,
     val missingDump: Boolean,
+    val note: String? = null,
 )
 
 /** Ejecuta un comando sin shell (los argumentos se pasan tal cual, sin problemas de comillas). */
@@ -49,6 +50,10 @@ class FpsProbe(private val ctx: Context) {
 
     private var layer: String? = null
     private var lastScan = 0L
+
+    /** Motivo por el que no hay FPS (se muestra en la ventana para diagnosticar). */
+    var note: String? = null
+        private set
 
     fun hasDump(): Boolean =
         ctx.checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED
@@ -98,7 +103,15 @@ class FpsProbe(private val ctx: Context) {
 
     /** Entre las capas visibles de apps, elige la que presentó un frame más recientemente. */
     private fun pickActiveLayer(): String? {
-        val list = Shell.run("dumpsys", "SurfaceFlinger", "--list") ?: return null
+        val list = Shell.run("dumpsys", "SurfaceFlinger", "--list")
+        if (list == null) {
+            note = "no se pudo ejecutar dumpsys"
+            return null
+        }
+        if (list.contains("Permission Denial", ignoreCase = true) || list.contains("denied", ignoreCase = true)) {
+            note = "dumpsys: permiso denegado"
+            return null
+        }
         val candidates = list.lines()
             .map { it.trim() }
             .filter { it.contains('/') && EXCLUDE.none { ex -> it.contains(ex, ignoreCase = true) } }
@@ -106,6 +119,10 @@ class FpsProbe(private val ctx: Context) {
             .distinct()
             .sortedByDescending { it.startsWith("SurfaceView") }
             .take(8)
+        if (candidates.isEmpty()) {
+            note = "sin capas: abre otra app (capas=${list.lines().size})"
+            return null
+        }
         var best: String? = null
         var bestTs = 0L
         for (c in candidates) {
@@ -115,6 +132,7 @@ class FpsProbe(private val ctx: Context) {
                 best = c
             }
         }
+        note = if (best == null) "sin frames en ${candidates.size} capas" else null
         return best
     }
 

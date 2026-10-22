@@ -55,7 +55,7 @@ class MonitorService : Service() {
             if (paused) return // se reanuda con ACTION_SCREEN_ON
             val hasDump = probe.hasDump()
             val (fps, app) = if (hasDump) probe.sample() else (null to null)
-            val snap = Snapshot(fps, app, thermal.read(hasDump), !hasDump)
+            val snap = Snapshot(fps, app, thermal.read(hasDump), !hasDump, probe.note)
             main.post {
                 overlay?.render(snap, Prefs.opacity(this@MonitorService), Prefs.compact(this@MonitorService))
             }

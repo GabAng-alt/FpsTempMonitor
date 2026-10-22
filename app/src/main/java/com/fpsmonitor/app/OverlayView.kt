@@ -76,6 +76,10 @@ class OverlayView(ctx: Context) : LinearLayout(ctx) {
                 appTv.text = "Falta permiso DUMP (ver app)"
                 appTv.visibility = VISIBLE
             }
+            s.fps == null && s.note != null -> {
+                appTv.text = s.note.take(34)
+                appTv.visibility = VISIBLE
+            }
             s.app != null -> {
                 appTv.text = s.app.takeLast(26)
                 appTv.visibility = VISIBLE
