@@ -79,19 +79,24 @@ class FpsProbe(private val ctx: Context) {
     private class Lat(val fps: Int, val lastTs: Long)
 
     /**
-     * `--list` imprime nombres con sufijo "#id", pero `--latency` compara contra el nombre sin él.
-     * Se prueba primero sin sufijo y, si no hay datos, con el nombre tal cual.
+     * `--list` imprime líneas como "<nombre>#id parentId=N", pero `--latency` compara contra el nombre
+     * sin ese sufijo. Se prueba primero limpio y, si no hay datos, con el nombre tal cual.
      */
     private fun latency(layerName: String): Lat? {
-        val stripped = layerName.replace(Regex("#\\d+$"), "")
-        val a = latencyRaw(stripped)
+        val clean = cleanName(layerName)
+        val a = latencyRaw(clean)
         if (a != null && a.lastTs > 0L) return a
-        if (stripped != layerName) {
+        if (clean != layerName) {
             val b = latencyRaw(layerName)
             if (b != null && b.lastTs > 0L) return b
         }
         return a
     }
+
+    private fun cleanName(line: String): String =
+        line.trim()
+            .replace(Regex("\\s+parentId=\\S*$"), "")
+            .replace(Regex("#\\d+$"), "")
 
     private fun latencyRaw(layerName: String): Lat? {
         val out = Shell.run("dumpsys", "SurfaceFlinger", "--latency", layerName) ?: return null
@@ -128,12 +133,14 @@ class FpsProbe(private val ctx: Context) {
             return null
         }
         val candidates = list.lines()
-            .map { it.trim() }
+            .map { cleanName(it) }
             .filter { it.contains('/') && EXCLUDE.none { ex -> it.contains(ex, ignoreCase = true) } }
+            .filter { CONTAINERS.none { c -> it.startsWith(c) } }
             .filter { !it.contains(ctx.packageName) }
             .distinct()
-            .sortedByDescending { it.startsWith("SurfaceView") }
-            .take(10)
+            .sortedWith(compareByDescending<String> { it.startsWith("SurfaceView") }
+                .thenByDescending { it.contains("BLAST") })
+            .take(12)
         if (candidates.isEmpty()) {
             note = "sin capas: abre otra app (capas=${list.lines().size})"
             return null
@@ -147,7 +154,7 @@ class FpsProbe(private val ctx: Context) {
                 best = c
             }
         }
-        note = if (best == null) "sin frames: ${candidates.first().takeLast(24)}" else null
+        note = if (best == null) "sin frames[${candidates.size}] ${candidates.first().takeLast(22)}" else null
         return best
     }
 
@@ -159,6 +166,11 @@ class FpsProbe(private val ctx: Context) {
 
     companion object {
         private const val SCAN_EVERY_MS = 6000L
+        // Capas "contenedor" de ventanas: nunca presentan frames.
+        private val CONTAINERS = listOf(
+            "ActivityRecord", "Task", "WindowToken", "DefaultTaskDisplayArea", "ImePlaceholder",
+            "Leaf:", "WindowedMagnification", "DisplayArea", "Display ",
+        )
         private val EXCLUDE = listOf(
             "com.android.systemui", "Background for", "Wallpaper", "ScreenDecor",
             "InputMethod", "NavigationBar", "StatusBar", "Splash", "Display Overlay",
