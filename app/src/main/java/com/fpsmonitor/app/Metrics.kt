@@ -61,19 +61,51 @@ class FpsProbe(private val ctx: Context) {
     /** Devuelve (fps, paquete de la capa activa). */
     fun sample(): Pair<Int?, String?> {
         val now = SystemClock.elapsedRealtime()
-        if (layer == null && now - lastScan > 1500 || now - lastScan > SCAN_EVERY_MS) {
+        if (now - lastScan > SCAN_EVERY_MS) {
             layer = pickActiveLayer()
             lastScan = now
         }
-        val l = layer ?: return null to null
+        val l = layer
+        if (l == null) return fallbackGlobal() to null
         val lat = latency(l)
         if (lat == null) {
             layer = null
-            return null to null
+            return fallbackGlobal() to null
         }
+        note = null
         // Pantalla estática o app en segundo plano: vuelve a buscar la capa activa en ~2 s.
         if (lat.fps == 0) lastScan = minOf(lastScan, now - SCAN_EVERY_MS + 2000L)
         return lat.fps to packageOf(l)
+    }
+
+    /** Respaldo: FPS globales de la pantalla (frames que presenta SurfaceFlinger por segundo). */
+    private fun fallbackGlobal(): Int? {
+        val g = globalFps()
+        if (g != null) note = "FPS global de pantalla"
+        return g
+    }
+
+    private var tsEnabled = false
+    private var lastTotal = -1L
+    private var lastTotalAt = 0L
+
+    private fun globalFps(): Int? {
+        if (!tsEnabled) {
+            Shell.run("dumpsys", "SurfaceFlinger", "--timestats", "-enable")
+            tsEnabled = true
+        }
+        val out = Shell.run("dumpsys", "SurfaceFlinger", "--timestats", "-dump", "-maxlayers", "0")
+            ?: return null
+        val total = Regex("totalFrames = (\\d+)").find(out)?.groupValues?.get(1)?.toLongOrNull()
+            ?: return null
+        val now = SystemClock.elapsedRealtime()
+        val prevTotal = lastTotal
+        val prevAt = lastTotalAt
+        lastTotal = total
+        lastTotalAt = now
+        if (prevTotal < 0L || now <= prevAt || total < prevTotal) return null
+        val dt = (now - prevAt) / 1000.0
+        return ((total - prevTotal) / dt).roundToInt().coerceIn(0, 240)
     }
 
     private class Lat(val fps: Int, val lastTs: Long)
@@ -93,10 +125,16 @@ class FpsProbe(private val ctx: Context) {
         return a
     }
 
+    /**
+     * Android 16 imprime "RequestedLayerState{<hex> <nombre>#<id> parentId=N ...}".
+     * Se extrae solo <nombre>, que es lo que entiende `--latency`.
+     */
     private fun cleanName(line: String): String =
         line.trim()
-            .replace(Regex("\\s+parentId=\\S*$"), "")
-            .replace(Regex("#\\d+$"), "")
+            .replace(Regex("^RequestedLayerState\\{[0-9a-fA-F]+\\s+"), "")
+            .replace(Regex("#\\d+\\s+parentId=.*$"), "")
+            .replace(Regex("\\s+parentId=\\S*.*$"), "")
+            .replace(Regex("#\\d+\\}?$"), "")
 
     private fun latencyRaw(layerName: String): Lat? {
         val out = Shell.run("dumpsys", "SurfaceFlinger", "--latency", layerName) ?: return null
@@ -174,7 +212,7 @@ class FpsProbe(private val ctx: Context) {
         private val EXCLUDE = listOf(
             "com.android.systemui", "Background for", "Wallpaper", "ScreenDecor",
             "InputMethod", "NavigationBar", "StatusBar", "Splash", "Display Overlay",
-            "Bounds for", "Gesture", "Dim layer", "Letterbox", "mouse",
+            "Bounds for", "Gesture", "Dim layer", "Letterbox", "mouse", "animation-leash", "Surface(",
         )
     }
 }
