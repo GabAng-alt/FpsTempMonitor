@@ -47,7 +47,7 @@ class MainActivity : Activity() {
         content.removeAllViews()
 
         title("FPS & Temp Monitor")
-        body("Ventana flotante con FPS y temperatura en tiempo real, también con otras apps y juegos abiertos.")
+        body("Cápsula flotante con los FPS en tiempo real (y, si quieres, la temperatura), visible sobre otras apps y juegos.")
 
         val overlayOk = Settings.canDrawOverlays(this)
         val dumpOk = checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED
@@ -91,10 +91,10 @@ class MainActivity : Activity() {
                 cm.setPrimaryClip(ClipData.newPlainText("adb", cmd))
                 Toast.makeText(this, "Copiado", Toast.LENGTH_SHORT).show()
             }
-            body("Sin este permiso la ventana sigue mostrando las temperaturas, pero no los FPS.")
+            body("Sin este permiso la cápsula no podrá mostrar los FPS.")
         }
 
-        section("2. Ventana flotante")
+        section("2. Monitor")
         val running = MonitorService.running
         button(if (running) "Detener monitor" else "Iniciar monitor") {
             if (running) {
@@ -109,26 +109,20 @@ class MainActivity : Activity() {
             content.postDelayed({ build() }, 400)
         }
 
+        section("3. Cápsula")
+        body("Por defecto la cápsula muestra solo los FPS. Si quieres, añade medidores de temperatura " +
+            "(la cápsula se alarga con cada uno):")
+        toggle("Temperatura CPU", "t_cpu")
+        toggle("Temperatura GPU", "t_gpu")
+        toggle("Temperatura batería", "t_bat")
+        toggle("Temperatura carcasa (SKN)", "t_skin")
+
+        body("Tamaño")
+        content.addView(slider(0, 90, Prefs.scale(this) - 60) { Prefs.setScale(this, it + 60) }, matchWrap(top = 4))
         body("Opacidad del fondo")
-        content.addView(SeekBar(this).apply {
-            max = 100
-            progress = Prefs.opacity(this@MainActivity)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) Prefs.setOpacity(this@MainActivity, p.coerceAtLeast(10))
-                }
-                override fun onStartTrackingTouch(s: SeekBar) {}
-                override fun onStopTrackingTouch(s: SeekBar) {}
-            })
-        }, matchWrap(top = 4))
+        content.addView(slider(0, 90, Prefs.opacity(this) - 10) { Prefs.setOpacity(this, it + 10) }, matchWrap(top = 4))
 
-        content.addView(Switch(this).apply {
-            text = "Modo compacto (solo FPS y temperatura máx.)"
-            isChecked = Prefs.compact(this@MainActivity)
-            setOnCheckedChangeListener { _: CompoundButton, c: Boolean -> Prefs.setCompact(this@MainActivity, c) }
-        }, matchWrap(top = 16))
-
-        body("Arrastra la ventana con el dedo para moverla. Para cerrarla usa «Detener» aquí o en la notificación.")
+        body("Arrastra la cápsula con el dedo para moverla. Para cerrarla usa «Detener» aquí o en la notificación.")
         body("Xiaomi/HyperOS: para que no se cierre en segundo plano, bloquea la app en Recientes y en " +
             "Ajustes › Apps › esta app › Ahorro de batería elige «Sin restricciones» (y activa Inicio automático).")
     }
@@ -174,6 +168,24 @@ class MainActivity : Activity() {
             })
         }
         content.addView(r, matchWrap(top = 6))
+    }
+
+    private fun toggle(label: String, key: String) = content.addView(Switch(this).apply {
+        text = label
+        isChecked = Prefs.flag(this@MainActivity, key)
+        setOnCheckedChangeListener { _: CompoundButton, c: Boolean -> Prefs.setFlag(this@MainActivity, key, c) }
+    }, matchWrap(top = 10))
+
+    private fun slider(min: Int, max: Int, value: Int, onChange: (Int) -> Unit) = SeekBar(this).apply {
+        this.max = max - min
+        progress = value.coerceIn(0, max - min)
+        setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
+                if (fromUser) onChange(p + min)
+            }
+            override fun onStartTrackingTouch(s: SeekBar) {}
+            override fun onStopTrackingTouch(s: SeekBar) {}
+        })
     }
 
     private fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(

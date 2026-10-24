@@ -7,95 +7,72 @@ import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
+import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
 
-/** Ventana flotante pequeña y semitransparente. */
+/**
+ * Cápsula flotante de una sola línea: "120 FPS". Los medidores de temperatura
+ * son opcionales y, al activarlos, se añaden a la misma línea (la cápsula se alarga).
+ */
 class OverlayView(ctx: Context) : LinearLayout(ctx) {
 
-    private val fpsTv = text(22f, bold = true)
-    private val line1 = text(12f)
-    private val line2 = text(12f)
-    private val appTv = text(9f).apply { setTextColor(GRAY) }
+    private val tv = TextView(ctx).apply {
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        setTextColor(Color.WHITE)
+        setSingleLine(true)
+        setShadowLayer(2f, 0f, 0f, Color.BLACK)
+    }
+
     private val bg = GradientDrawable().apply {
-        cornerRadius = dp(10f)
+        // Radio enorme: Android lo limita a la mitad de la altura, y queda una cápsula perfecta.
+        cornerRadius = dp(100f)
         setColor(Color.BLACK)
+        setStroke(dp(1f).toInt(), Color.parseColor("#33FFFFFF"))
     }
 
     init {
-        orientation = VERTICAL
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
         background = bg
-        val p = dp(8f).toInt()
-        setPadding(p, dp(5f).toInt(), p, dp(5f).toInt())
-        addView(fpsTv)
-        addView(line1)
-        addView(line2)
-        addView(appTv)
+        addView(tv)
     }
 
-    fun render(s: Snapshot, opacity: Int, compact: Boolean) {
-        bg.alpha = (opacity.coerceIn(10, 100) * 255 / 100)
+    fun render(s: Snapshot, cfg: OverlayConfig) {
+        bg.alpha = cfg.opacity.coerceIn(10, 100) * 255 / 100
 
-        // FPS
-        val fb = SpannableStringBuilder()
-        if (s.fps != null) {
-            fb.add("${s.fps}", fpsColor(s.fps))
-            fb.add(" FPS", GRAY)
-        } else {
-            fb.add("-- FPS", GRAY)
-        }
-        fpsTv.text = fb
+        val k = cfg.scale.coerceIn(60, 150) / 100f
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f * k)
+        val padH = dp(10f * k).toInt()
+        val padV = dp(3f * k).toInt()
+        setPadding(padH, padV, padH, padV)
+
+        val b = SpannableStringBuilder()
+        if (s.fps != null) b.add("${s.fps}", fpsColor(s.fps)) else b.add("--", GRAY)
+        b.add(" FPS", GRAY, 0.7f)
 
         val t = s.temps
-        if (compact) {
-            val max = listOfNotNull(t.cpu, t.gpu, t.skin, t.battery).maxOrNull()
-            line1.text = SpannableStringBuilder().also { b ->
-                if (max != null) b.add("${max.roundToInt()}°C", tempColor(max, 45f, 60f)) else b.add("--°C", GRAY)
-            }
-            line2.visibility = GONE
-            appTv.visibility = GONE
-            return
-        }
+        if (cfg.cpu) b.metric("CPU", t.cpu, 55f, 70f)
+        if (cfg.gpu) b.metric("GPU", t.gpu, 55f, 70f)
+        if (cfg.bat) b.metric("BAT", t.battery, 38f, 43f)
+        if (cfg.skin) b.metric("SKN", t.skin, 38f, 43f)
 
-        line1.text = SpannableStringBuilder().also { b ->
-            b.pair("CPU", t.cpu, 55f, 70f)
-            b.add("  ", GRAY)
-            b.pair("GPU", t.gpu, 55f, 70f)
-        }
-        line2.text = SpannableStringBuilder().also { b ->
-            b.pair("BAT", t.battery, 38f, 43f)
-            b.add("  ", GRAY)
-            b.pair("SKN", t.skin, 38f, 43f)
-        }
-        line2.visibility = VISIBLE
-
-        when {
-            s.missingDump -> {
-                appTv.text = "Falta permiso DUMP (ver app)"
-                appTv.visibility = VISIBLE
-            }
-            s.note != null -> {
-                appTv.text = s.note.take(34)
-                appTv.visibility = VISIBLE
-            }
-            s.app != null -> {
-                appTv.text = s.app.takeLast(26)
-                appTv.visibility = VISIBLE
-            }
-            else -> appTv.visibility = GONE
-        }
+        tv.text = b
     }
 
-    private fun SpannableStringBuilder.add(txt: String, color: Int) {
+    private fun SpannableStringBuilder.add(txt: String, color: Int, size: Float = 1f) {
         val start = length
         append(txt)
         setSpan(ForegroundColorSpan(color), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (size != 1f) setSpan(RelativeSizeSpan(size), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 
-    private fun SpannableStringBuilder.pair(label: String, v: Float?, warn: Float, hot: Float) {
-        add("$label ", GRAY)
+    private fun SpannableStringBuilder.metric(label: String, v: Float?, warn: Float, hot: Float) {
+        add("  │  ", DIVIDER)
+        add("$label ", GRAY, 0.7f)
         if (v != null) add("${v.roundToInt()}°", tempColor(v, warn, hot)) else add("--", GRAY)
     }
 
@@ -111,13 +88,6 @@ class OverlayView(ctx: Context) : LinearLayout(ctx) {
         else -> GREEN
     }
 
-    private fun text(size: Float, bold: Boolean = false) = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
-        setTextColor(Color.WHITE)
-        typeface = if (bold) Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) else Typeface.MONOSPACE
-        setShadowLayer(2f, 0f, 0f, Color.BLACK)
-    }
-
     private fun dp(v: Float) = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics
     )
@@ -127,5 +97,6 @@ class OverlayView(ctx: Context) : LinearLayout(ctx) {
         private val AMBER = Color.parseColor("#FFC043")
         private val RED = Color.parseColor("#FF5C5C")
         private val GRAY = Color.parseColor("#B0B8C0")
+        private val DIVIDER = Color.parseColor("#55FFFFFF")
     }
 }

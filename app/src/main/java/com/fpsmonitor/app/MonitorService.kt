@@ -54,11 +54,12 @@ class MonitorService : Service() {
         override fun run() {
             if (paused) return // se reanuda con ACTION_SCREEN_ON
             val hasDump = probe.hasDump()
+            val cfg = Prefs.config(this@MonitorService)
             val (fps, app) = if (hasDump) probe.sample() else (null to null)
-            val snap = Snapshot(fps, app, thermal.read(hasDump), !hasDump, probe.note)
-            main.post {
-                overlay?.render(snap, Prefs.opacity(this@MonitorService), Prefs.compact(this@MonitorService))
-            }
+            // Solo se consultan temperaturas si el usuario activó alguna (ahorra batería).
+            val temps = if (cfg.anyTemp) thermal.read(hasDump) else Temps()
+            val snap = Snapshot(fps, app, temps, !hasDump, probe.note)
+            main.post { overlay?.render(snap, cfg) }
             bg.postDelayed(this, 1000L)
         }
     }
